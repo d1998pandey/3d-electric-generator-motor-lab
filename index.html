@@ -1,0 +1,1849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interactive 3D Electric Generator & Electric Motor Lab</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+  :root {
+    --bg-dark: #060911;
+    --panel-bg: rgba(13, 19, 33, 0.95);
+    --panel-border: #22304c;
+    --text-main: #f1f5f9;
+    --text-muted: #94a3b8;
+    --accent: #00d2ff;
+    --accent-sec: #a855f7;
+    --gen-col: #00f59b;
+    --mot-col: #ffbe0b;
+    --north-col: #ef4444;
+    --south-col: #3b82f6;
+    --force-col: #f97316;
+    --curr-col: #facc15;
+    --field-col: #38bdf8;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg-dark);
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Top Header & Primary Mode Switcher */
+  header {
+    background: #0b111e;
+    border-bottom: 1px solid var(--panel-border);
+    padding: 6px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 35;
+    flex-shrink: 0;
+  }
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 14.5px;
+    color: var(--accent);
+    letter-spacing: 0.3px;
+  }
+  .brand span.sub {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 11.5px;
+  }
+
+  /* Prominent Mode A (Generator) vs Mode B (Motor) Switch */
+  .primary-mode-switch {
+    display: flex;
+    gap: 5px;
+    background: #060911;
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+  }
+  .mode-pill {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 6px 13px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .mode-pill:hover { color: #fff; }
+  .mode-pill.active-gen {
+    background: var(--gen-col);
+    color: #03120b;
+    box-shadow: 0 0 12px rgba(0, 245, 155, 0.35);
+  }
+  .mode-pill.active-mot {
+    background: var(--mot-col);
+    color: #140d00;
+    box-shadow: 0 0 12px rgba(255, 190, 11, 0.35);
+  }
+  .mode-pill.active-other {
+    background: var(--accent);
+    color: #040811;
+  }
+
+  .btn-sm {
+    background: #152036;
+    border: 1px solid var(--panel-border);
+    color: var(--text-main);
+    padding: 4px 9px;
+    border-radius: 5px;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm.active-toggle {
+    background: rgba(0, 210, 255, 0.22);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  /* Main Full-Screen Workspace */
+  .app-body {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+  }
+  #canvas-container {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle at center, #0e172a 0%, #050810 100%);
+    z-index: 1;
+  }
+
+  /* Left Slide-Out Drawer (Components & Inspection) */
+  .left-drawer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 335px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(12px);
+    border-right: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    z-index: 20;
+    box-shadow: 8px 0 28px rgba(0,0,0,0.65);
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .left-drawer.closed { transform: translateX(-100%); }
+
+  /* Right Slide-Out Drawer (Controls & Physics Modes) */
+  .right-drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 345px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(12px);
+    border-left: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    z-index: 20;
+    box-shadow: -8px 0 28px rgba(0,0,0,0.65);
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .right-drawer.closed { transform: translateX(100%); }
+
+  /* Bottom Collapsible Drawer (Live Oscilloscope Graphs, Measurements & Energy Flow) */
+  .bottom-drawer {
+    position: absolute;
+    left: 335px;
+    right: 345px;
+    bottom: 0;
+    height: 195px;
+    background: rgba(11, 16, 28, 0.94);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid var(--panel-border);
+    z-index: 18;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), left 0.28s, right 0.28s;
+  }
+  .bottom-drawer.closed { transform: translateY(100%); }
+  .bottom-drawer.expand-left { left: 0; }
+  .bottom-drawer.expand-right { right: 0; }
+
+  .left-drawer::-webkit-scrollbar,
+  .right-drawer::-webkit-scrollbar { width: 5px; }
+  .left-drawer::-webkit-scrollbar-thumb,
+  .right-drawer::-webkit-scrollbar-thumb { background: #283655; border-radius: 3px; }
+
+  /* Side & Bottom Handle Tabs */
+  .drawer-tab-left {
+    position: absolute;
+    top: 45%;
+    left: 335px;
+    transform: translateY(-50%);
+    background: #131c31;
+    border: 1px solid var(--accent);
+    border-left: none;
+    color: var(--accent);
+    padding: 12px 6px;
+    border-radius: 0 8px 8px 0;
+    cursor: pointer;
+    z-index: 25;
+    writing-mode: vertical-rl;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    transition: left 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    user-select: none;
+  }
+  .drawer-tab-left.closed { left: 0; }
+
+  .drawer-tab-right {
+    position: absolute;
+    top: 45%;
+    right: 345px;
+    transform: translateY(-50%);
+    background: #131c31;
+    border: 1px solid var(--accent);
+    border-right: none;
+    color: var(--accent);
+    padding: 12px 6px;
+    border-radius: 8px 0 0 8px;
+    cursor: pointer;
+    z-index: 25;
+    writing-mode: vertical-rl;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    transition: right 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    user-select: none;
+  }
+  .drawer-tab-right.closed { right: 0; }
+
+  .drawer-tab-bottom {
+    position: absolute;
+    bottom: 195px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #131c31;
+    border: 1px solid var(--accent);
+    border-bottom: none;
+    color: var(--accent);
+    padding: 4px 16px;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    z-index: 25;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    transition: bottom 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    user-select: none;
+  }
+  .drawer-tab-bottom.closed { bottom: 0; }
+
+  .panel-sec {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .sec-title {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    font-weight: 700;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  /* Sliders & Controls */
+  .slider-row {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-bottom: 8px;
+  }
+  .slider-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11.5px;
+    align-items: center;
+  }
+  .slider-head span.val {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+    height: 5px;
+    cursor: pointer;
+  }
+  select {
+    background: #070b13;
+    border: 1px solid #2b3958;
+    color: #fff;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    width: 100%;
+    outline: none;
+  }
+  .chk-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .chk-lbl {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    cursor: pointer;
+    color: #dbe4f0;
+  }
+
+  /* Component Inspector List & Card */
+  .comp-btn-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+    margin-bottom: 8px;
+  }
+  .comp-btn {
+    background: #101829;
+    border: 1px solid #223252;
+    color: #cbd5e1;
+    padding: 5px 7px;
+    border-radius: 5px;
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+    transition: 0.12s;
+  }
+  .comp-btn:hover, .comp-btn.selected {
+    border-color: var(--accent);
+    background: rgba(0, 210, 255, 0.15);
+    color: #fff;
+  }
+  .info-card {
+    background: #080c15;
+    border: 1px solid #243556;
+    border-radius: 6px;
+    padding: 9px 11px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    margin-bottom: 8px;
+  }
+  .info-card h4 {
+    color: var(--accent);
+    font-size: 12.5px;
+    margin-bottom: 4px;
+  }
+  .formula-box {
+    background: #0d1424;
+    border-left: 3px solid var(--accent);
+    padding: 6px 9px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #a5f3fc;
+    margin: 5px 0;
+    border-radius: 0 4px 4px 0;
+  }
+
+  /* Top-Center Floating Transport & Camera Bar */
+  .top-floating-bar {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 5px;
+    background: rgba(13, 19, 33, 0.92);
+    backdrop-filter: blur(8px);
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    z-index: 15;
+    align-items: center;
+    flex-wrap: wrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  }
+
+  /* Bottom Oscilloscope & Telemetry Layout */
+  .bottom-content {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 270px 1fr 275px;
+    gap: 10px;
+    padding: 8px 12px;
+    overflow: hidden;
+  }
+  .telemetry-box {
+    background: #070b13;
+    border: 1px solid #1e2c47;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .tel-row {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px dashed #172238;
+    padding: 2px 0;
+  }
+  .tel-row span.v { color: var(--accent); font-weight: 600; }
+
+  #oscilloscope-canvas {
+    width: 100%;
+    height: 100%;
+    background: #05080f;
+    border: 1px solid #1e2c47;
+    border-radius: 6px;
+  }
+
+  /* Energy Flow Bar & Comparison Modal Overlay */
+  .energy-pipe {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #0a101d;
+    border: 1px solid #233354;
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-top: 4px;
+    font-size: 10.5px;
+    position: relative;
+    overflow: hidden;
+  }
+  .energy-node {
+    z-index: 2;
+    text-align: center;
+    font-weight: 700;
+  }
+
+  /* Modal Overlay for Comparison Table / Guided / Quiz */
+  .overlay-modal {
+    display: none;
+    position: absolute;
+    top: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(860px, 92vw);
+    max-height: calc(100vh - 270px);
+    background: rgba(12, 18, 32, 0.97);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 16px 20px;
+    z-index: 28;
+    overflow-y: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.8);
+  }
+  .comp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 10px;
+  }
+  .comp-table th, .comp-table td {
+    border: 1px solid #263859;
+    padding: 7px 10px;
+    text-align: left;
+  }
+  .comp-table th {
+    background: #152238;
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div class="brand">
+      <span>3D ELECTRIC GENERATOR &amp; MOTOR LAB</span>
+      <span class="sub">Electromagnetic Induction, Lorentz Torque, Commutation &amp; Back-EMF</span>
+    </div>
+
+    <!-- Primary Experiment Mode Switcher -->
+    <div class="primary-mode-switch">
+      <button class="mode-pill active-gen" id="pill-generator" onclick="switchPrimaryMode('generator')">⚡ MODE A: ELECTRIC GENERATOR</button>
+      <button class="mode-pill" id="pill-motor" onclick="switchPrimaryMode('motor')">⚙️ MODE B: ELECTRIC MOTOR</button>
+      <button class="mode-pill" id="pill-compare" onclick="openModalView('compare')">⇄ Compare Both</button>
+      <button class="mode-pill" id="pill-guided" onclick="openModalView('guided')">📖 Guided (10 Steps)</button>
+      <button class="mode-pill" id="pill-quiz" onclick="openModalView('quiz')">🎯 Prediction Quiz</button>
+    </div>
+
+    <div style="display:flex; gap:5px; align-items:center;">
+      <button class="btn-sm active-toggle" id="btn-left-drawer" onclick="toggleLeftDrawer()">◧ Parts</button>
+      <button class="btn-sm active-toggle" id="btn-right-drawer" onclick="toggleRightDrawer()">◨ Controls</button>
+      <button class="btn-sm active-toggle" id="btn-bottom-drawer" onclick="toggleBottomDrawer()">◫ Graphs</button>
+      <button class="btn-sm" id="btn-clean-3d" onclick="toggleClean3D()">👁 Clean 3D Only</button>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+  <!-- LEFT DRAWER: APPARATUS COMPONENTS, VISIBILITY & EXPLODED VIEW -->
+  <aside class="left-drawer" id="left-drawer">
+    <div class="panel-sec">
+      <div class="sec-title">
+        <span>3D Apparatus Inspector</span>
+        <span style="color:var(--accent); font-size:10px;">Click Part in 3D or Below</span>
+      </div>
+      <div class="comp-btn-grid">
+        <button class="comp-btn selected" id="cbtn-coil" onclick="selectComponent('coil')">Rectangular Coil ABCD</button>
+        <button class="comp-btn" id="cbtn-magnets" onclick="selectComponent('magnets')">N &amp; S Magnetic Poles</button>
+        <button class="comp-btn" id="cbtn-rings" onclick="selectComponent('rings')">Slip Rings / Commutator</button>
+        <button class="comp-btn" id="cbtn-brushes" onclick="selectComponent('brushes')">Carbon Brushes (B₁, B₂)</button>
+        <button class="comp-btn" id="cbtn-axle" onclick="selectComponent('axle')">Central Axle &amp; Drive</button>
+        <button class="comp-btn" id="cbtn-external" onclick="selectComponent('external')">External Load / Supply</button>
+      </div>
+
+      <div class="info-card" id="comp-inspector-card">
+        <h4 id="comp-title">Rectangular Conducting Coil (Armature ABCD)</h4>
+        <p id="comp-purpose" style="margin-bottom:5px;"><strong>Purpose:</strong> Houses N turns of insulated copper wire. Sides AB (red-tagged) and CD (blue-tagged) cut magnetic flux lines during rotation.</p>
+        <p id="comp-removed" style="color:#fde68a;"><strong>If Removed/Replaced:</strong> Without a closed conducting loop, no induced current or magnetic torque couple can be established.</p>
+      </div>
+    </div>
+
+    <div class="panel-sec">
+      <div class="sec-title"><span>Coil &amp; Assembly View Style</span></div>
+      <div style="display:flex; gap:5px; margin-bottom:8px;">
+        <button class="btn-sm active-toggle" id="style-solid" style="flex:1;" onclick="setCoilStyle('solid')">Solid Wire</button>
+        <button class="btn-sm" id="style-wire" style="flex:1;" onclick="setCoilStyle('wire')">Outline</button>
+        <button class="btn-sm" id="style-exploded" style="flex:1;" onclick="toggleExplodedView()">Exploded View</button>
+      </div>
+      <div class="slider-row">
+        <div class="slider-head"><span>Exploded Separation Distance</span><span class="val" id="val-explode">0%</span></div>
+        <input type="range" id="rng-explode" min="0" max="100" step="2" value="0" oninput="onExplodeSlider(this.value)">
+      </div>
+    </div>
+
+    <div class="panel-sec" style="border-bottom:none;">
+      <div class="sec-title"><span>3D Vector &amp; Field Overlays</span></div>
+      <div class="chk-grid">
+        <label class="chk-lbl"><input type="checkbox" id="chk-bfield" checked onchange="syncVisibility()"> <span style="color:var(--field-col)">■</span> B-Field Lines (N→S)</label>
+        <label class="chk-lbl"><input type="checkbox" id="chk-current" checked onchange="syncVisibility()"> <span style="color:var(--curr-col)">■</span> Current Arrows (I)</label>
+        <label class="chk-lbl"><input type="checkbox" id="chk-forces" checked onchange="syncVisibility()"> <span style="color:var(--force-col)">■</span> Forces F_AB &amp; F_CD</label>
+        <label class="chk-lbl"><input type="checkbox" id="chk-area-vec" checked onchange="syncVisibility()"> <span style="color:#a855f7">■</span> Area Normal (n̂)</label>
+        <label class="chk-lbl"><input type="checkbox" id="chk-hand-rule" onchange="syncVisibility()"> ✋ 3D Fleming Hand</label>
+        <label class="chk-lbl"><input type="checkbox" id="chk-3d-labels" checked onchange="syncVisibility()"> 3D Floating Labels</label>
+      </div>
+    </div>
+  </aside>
+
+  <div class="drawer-tab-left" id="tab-left" onclick="toggleLeftDrawer()">◀ PARTS</div>
+
+  <!-- CENTER 3D APPARATUS WORKSPACE -->
+  <main id="canvas-container"></main>
+
+  <!-- TOP FLOATING TRANSPORT, SLOW-MOTION & CAMERA BAR -->
+  <div class="top-floating-bar">
+    <button class="btn-sm active-toggle" id="btn-run" onclick="toggleRun()">⏸ Pause</button>
+    <button class="btn-sm" id="btn-slowmo" onclick="toggleSlowMo()">🐢 Slow Motion (0.15×)</button>
+    <button class="btn-sm" onclick="stepAngle(15)">+15° Step</button>
+    <button class="btn-sm" onclick="setCoilAngleDeg(0)">θ = 0° (Max Φ)</button>
+    <button class="btn-sm" onclick="setCoilAngleDeg(90)">θ = 90° (Max τ/ε)</button>
+    <span style="color:#334155;">|</span>
+    <button class="btn-sm" onclick="setCameraView('iso')">3D Iso</button>
+    <button class="btn-sm" onclick="setCameraView('commutator')">Zoom Rings/Brushes</button>
+    <button class="btn-sm" onclick="setCameraView('top')">Top</button>
+    <button class="btn-sm" onclick="setCameraView('front')">Front</button>
+  </div>
+
+  <!-- MODAL FOR COMPARISON, GUIDED LEARNING & PREDICTION QUIZ -->
+  <div class="overlay-modal" id="overlay-modal">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <h3 id="modal-title" style="color:var(--accent); font-size:15px;">Generator vs. Motor Comparison</h3>
+      <button class="btn-sm" onclick="closeModalView()">✕ Close Window</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+
+  <div class="drawer-tab-right" id="tab-right" onclick="toggleRightDrawer()">CONTROLS ▶</div>
+
+  <!-- RIGHT DRAWER: EXPERIMENT CONTROLS, LENZ'S LAW, FLEMING LHR & BACK-EMF -->
+  <aside class="right-drawer" id="right-drawer">
+    <div id="dynamic-right-controls"></div>
+  </aside>
+
+  <div class="drawer-tab-bottom" id="tab-bottom" onclick="toggleBottomDrawer()">▼ LIVE GRAPHS &amp; TELEMETRY</div>
+
+  <!-- BOTTOM DRAWER: LIVE MEASUREMENTS, SYNCHRONIZED GRAPHS & ENERGY CONVERSION -->
+  <section class="bottom-drawer" id="bottom-drawer">
+    <div class="bottom-content">
+      <!-- Live Numerical Telemetry -->
+      <div class="telemetry-box" id="telemetry-box"></div>
+
+      <!-- Synchronized Real-Time Oscilloscope (Flux Φ, EMF ε / Back-EMF, Current I, Torque τ) -->
+      <canvas id="oscilloscope-canvas"></canvas>
+
+      <!-- Real-Time Energy Conversion & Lenz/Back-EMF Status -->
+      <div class="telemetry-box" id="energy-box"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ============================================================================
+   1. GLOBAL PHYSICS & SIMULATION STATE
+   Angle Convention (Explicitly documented & consistent across 3D + Graphs):
+   - Magnetic Field B points horizontally from North Pole (-X, Red) to South Pole (+X, Blue): B = +B î.
+   - Coil Rotation Axis is along the Y-axis (depth shaft).
+   - θ is the angle between Magnetic Field B (+X) and Coil Area Normal Vector n̂:
+     * At θ = 0°: Coil plane is vertical (in YZ plane), n̂ || B, Flux Φ = +BA is MAXIMUM, |ε| = 0, |τ| = 0.
+     * At θ = 90°: Coil plane is horizontal (in XY plane), n̂ ⊥ B, Flux Φ = 0, |ε| = NBAω is MAXIMUM, |τ| = NIAB is MAXIMUM.
+   ============================================================================ */
+const state = {
+  mode: 'generator',       // 'generator' | 'motor'
+  running: true,
+  slowMo: false,
+  thetaRad: 0,             // Coil angle θ (rad)
+
+  // Shared Physical Parameters
+  B: 1.2,                  // Magnetic field strength (Tesla)
+  reverseB: false,         // Toggle N/S polarity
+  N: 10,                   // Number of coil turns
+  coilWidth: 2.4,          // Width a (m, scaled for lab)
+  coilLength: 3.2,         // Active length L in field (m, scaled)
+  R_coil: 2.0,             // Internal armature resistance (Ω)
+
+  // Generator Specific Parameters
+  genType: 'AC',           // 'AC' (Two continuous Slip Rings) | 'DC' (Split-Ring Commutator)
+  omegaDrive: 3.5,         // Mechanical drive angular velocity (rad/s)
+  R_load: 8.0,             // External load resistance (Ω)
+  circuitClosed: true,     // Open vs Closed external switch
+  loadPreset: 'normal',    // 'open' | 'light' | 'heavy' (for Lenz's law comparison)
+
+  // Motor Specific Parameters
+  V_supply: 12.0,          // Applied DC Supply Voltage (V)
+  reverseV: false,         // Reverse battery polarity
+  tauLoad: 0.4,            // External mechanical load torque on shaft (N·m)
+  omegaMotor: 0.0,         // Dynamic motor angular speed (rad/s) solved via ODE
+  currentLimiterOn: false,
+  maxCurrentLimit: 6.0,    // A
+
+  // Visual / Inspection State
+  selectedComp: 'coil',
+  coilStyle: 'solid',
+  explodeFactor: 0,        // 0 to 1
+  flemingChallengeMode: false,
+  flemingGuessed: false,
+
+  // Guided & Quiz indices
+  guidedStep: 0,
+  quizIdx: 0,
+  quizScore: 0,
+
+  // Time history for synchronized oscilloscope
+  history: []
+};
+
+const COMP_INFO = {
+  coil: {
+    title: 'Rectangular Conducting Coil (Armature ABCD)',
+    purpose: 'Consists of N turns of insulated copper wire wound on a frame. Active sides AB (orange tag) and CD (cyan tag) cut magnetic field lines or experience Lorentz forces F = BIL.',
+    removed: 'Without the conducting loop, neither induced EMF (Generator) nor magnetic torque couple (Motor) can occur.'
+  },
+  magnets: {
+    title: 'Permanent Field Magnets (North & South Poles)',
+    purpose: 'Provides a uniform horizontal magnetic field B directed from North Pole (Red, −X) to South Pole (Blue, +X).',
+    removed: 'If removed (B = 0), magnetic flux Φ = 0 and Lorentz force F = BIL = 0; neither machine can function.'
+  },
+  rings: {
+    title: 'Slip Rings (AC) vs. Split-Ring Commutator (DC)',
+    purpose: 'AC Generator uses two full continuous slip rings so alternating current reaches the load. DC Motor & DC Generator use a cylindrical ring split into two insulated halves (C₁, C₂) that reverse connections every 180°.',
+    removed: 'Without rings/commutator, the external wires would twist and snap after a few rotations; replacing a motor commutator with slip rings causes the coil to oscillate back and forth instead of rotating continuously!'
+  },
+  brushes: {
+    title: 'Stationary Carbon Brushes (B₁ & B₂)',
+    purpose: 'Spring-loaded graphite blocks that maintain smooth sliding electrical contact between the rotating rings and the stationary external circuit.',
+    removed: 'Opens the external circuit—stopping current flow in both generator load and motor armature.'
+  },
+  axle: {
+    title: 'Central Rotating Axle & Mechanical Drive / Pulley',
+    purpose: 'Supports the armature coil mechanically. In a generator, an external prime mover (hand crank/turbine) turns the axle; in a motor, the axle delivers mechanical shaft power P = τω to a load.',
+    removed: 'The coil would lose rotational alignment between the magnetic poles.'
+  },
+  external: {
+    title: 'External Circuit (Bulb Load vs. DC Power Supply)',
+    purpose: 'In Generator mode, receives electrical power P = εI (lighting the bulb). In Motor mode, the DC battery supplies electrical power P = VI to drive rotation.',
+    removed: 'In Generator mode (open circuit), induced EMF ε still exists across the brushes, but current I = 0 and opposing Lenz torque vanishes.'
+  }
+};
+
+/* ============================================================================
+   2. ELECTROMECHANICAL PHYSICS ENGINE (GENERATOR & MOTOR ODE SOLVER)
+   ============================================================================ */
+function computeInstantaneousPhysics(dt) {
+  // Effective area in realistic lab scale (scaled by 0.05 so numbers are clean textbook values)
+  const A = state.coilWidth * state.coilLength * 0.05; // m²
+  const B_signed = state.B * (state.reverseB ? -1 : 1);
+  const N = state.N;
+
+  if (state.mode === 'generator') {
+    const omega = state.omegaDrive;
+    if (state.running) {
+      state.thetaRad = (state.thetaRad + omega * dt) % (2 * Math.PI);
+    }
+    const theta = state.thetaRad;
+
+    // Flux Φ_B = B * A * cos(θ)
+    const flux = B_signed * A * Math.cos(theta);
+    // Induced EMF in coil: ε_coil = -N dΦ/dt = N * B * A * ω * sin(θ)
+    const emfCoil = N * B_signed * A * omega * Math.sin(theta);
+
+    // Terminal EMF after slip rings (AC) or split-ring commutator (rectified pulsating DC)
+    const commSign = Math.sin(theta) >= 0 ? 1 : -1;
+    const emfTerminal = state.genType === 'AC' ? emfCoil : (emfCoil * commSign);
+
+    const R_total = state.R_coil + state.R_load;
+    const currentCoil = state.circuitClosed ? (emfCoil / R_total) : 0;
+    const currentExt = state.circuitClosed ? (emfTerminal / R_total) : 0;
+
+    // Lenz's Law opposing electromagnetic torque: τ_Lenz = N * I_coil * A * B * sin(θ)
+    const tauLenz = N * currentCoil * A * B_signed * Math.sin(theta);
+    const mechPowerIn = Math.abs(tauLenz * omega);
+    const elecPowerLoad = currentExt * currentExt * state.R_load;
+    const heatLoss = currentCoil * currentCoil * state.R_coil;
+    const efficiency = mechPowerIn > 1e-4 ? (elecPowerLoad / mechPowerIn) * 100 : 0;
+
+    return {
+      A, B_signed, omega, theta,
+      flux, emfCoil, emfTerminal,
+      currentCoil, currentExt,
+      tauMag: tauLenz,
+      powerIn: mechPowerIn,
+      powerOut: elecPowerLoad,
+      powerLoss: heatLoss,
+      efficiency,
+      eBack: 0
+    };
+  } else {
+    // MODE B: ELECTRIC MOTOR WITH SPLIT-RING COMMUTATOR & BACK-EMF
+    const theta = state.thetaRad;
+    const V_app = state.V_supply * (state.reverseV ? -1 : 1);
+    const rectSin = Math.abs(Math.sin(theta)); // Split-ring commutator rectifies sin(θ) every 180°
+
+    // Back-EMF opposes applied voltage: E_back = k_e * ω = (N * |B| * A * |sin θ|) * ω
+    const ke_inst = N * Math.abs(B_signed) * A * Math.max(0.15, rectSin);
+    const eBack = ke_inst * state.omegaMotor * Math.sign(V_app || 1);
+
+    let I_arm = (V_app - eBack) / state.R_coil;
+    if (state.currentLimiterOn && Math.abs(I_arm) > state.maxCurrentLimit) {
+      I_arm = Math.sign(I_arm) * state.maxCurrentLimit;
+    }
+
+    // Commutator reverses coil current every half turn so torque stays unidirectional
+    const commFactor = Math.sin(theta) >= 0 ? 1 : -1;
+    const currentCoil = I_arm * commFactor;
+
+    // Electromagnetic Torque τ_e = N * I_arm * A * B * |sin θ|
+    const tauElec = N * I_arm * A * B_signed * Math.max(0.12, rectSin);
+
+    if (state.running && dt > 0) {
+      const J_inertia = 0.18;
+      const b_viscous = 0.08;
+      const dirSign = Math.sign(tauElec);
+      const loadOpposing = Math.abs(state.omegaMotor) > 0.05 || Math.abs(tauElec) > state.tauLoad
+        ? dirSign * state.tauLoad
+        : tauElec;
+      const netTau = tauElec - loadOpposing - b_viscous * state.omegaMotor;
+      state.omegaMotor += (netTau / J_inertia) * dt;
+      state.thetaRad = (state.thetaRad + state.omegaMotor * dt) % (2 * Math.PI);
+      if (state.thetaRad < 0) state.thetaRad += 2 * Math.PI;
+    }
+
+    const flux = B_signed * A * Math.cos(state.thetaRad);
+    const pElecIn = Math.abs(V_app * I_arm);
+    const pHeat = I_arm * I_arm * state.R_coil;
+    const pMechOut = Math.max(0, pElecIn - pHeat);
+    const efficiency = pElecIn > 1e-4 ? (pMechOut / pElecIn) * 100 : 0;
+
+    return {
+      A, B_signed, omega: state.omegaMotor, theta: state.thetaRad,
+      flux,
+      emfCoil: -eBack,
+      emfTerminal: V_app,
+      currentCoil,
+      currentExt: I_arm,
+      tauMag: tauElec,
+      powerIn: pElecIn,
+      powerOut: pMechOut,
+      powerLoss: pHeat,
+      efficiency,
+      eBack
+    };
+  }
+}
+
+/* ============================================================================
+   3. THREE.JS 3D APPARATUS BUILDER (GENUINE 3D MODEL WITH CLICKABLE PARTS)
+   ============================================================================ */
+let scene, camera, renderer, controls, raycaster, mouse;
+let magnetGroup, coilGroup, ringsGroup, brushesGroup, axleGroup, externalGroup;
+let fieldLinesGroup, vectorsGroup, handRuleGroup, labelsGroup;
+let bulbGlassMat, bulbPointLight, crankGroup, pulleyGroup;
+let currentBeadMeshes = [];
+let clickableMeshes = [];
+
+function makeTextSprite(text, colorStr = '#f8fafc', scale = 1.0) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 100;
+  const ctx = canvas.getContext('2d');
+  ctx.font = 'bold 38px Inter, Consolas, sans-serif';
+  ctx.strokeStyle = 'rgba(5, 8, 16, 0.92)';
+  ctx.lineWidth = 7;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.strokeText(text, 160, 50);
+  ctx.fillStyle = colorStr;
+  ctx.fillText(text, 160, 50);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
+  const sp = new THREE.Sprite(mat);
+  sp.scale.set(1.7 * scale, 0.53 * scale, 1);
+  sp.renderOrder = 30;
+  return sp;
+}
+
+function initThreeJS() {
+  const container = document.getElementById('canvas-container');
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.1, 500);
+  camera.position.set(0, 7.5, 13.5);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.target.set(0, 0, 1.2);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.68));
+  const dir1 = new THREE.DirectionalLight(0xffffff, 0.85);
+  dir1.position.set(12, 20, 16);
+  scene.add(dir1);
+  const dir2 = new THREE.DirectionalLight(0x90caf9, 0.4);
+  dir2.position.set(-14, -10, -10);
+  scene.add(dir2);
+
+  // Base wooden/metallic optical bench platform
+  const baseGeo = new THREE.BoxGeometry(14, 0.4, 13);
+  const baseMat = new THREE.MeshPhongMaterial({ color: 0x0f172a, shininess: 20 });
+  const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+  baseMesh.position.set(0, -2.5, 1.5);
+  scene.add(baseMesh);
+
+  const grid = new THREE.GridHelper(14, 14, 0x263859, 0x152238);
+  grid.position.set(0, -2.29, 1.5);
+  scene.add(grid);
+
+  magnetGroup = new THREE.Group();
+  coilGroup = new THREE.Group();
+  ringsGroup = new THREE.Group();
+  brushesGroup = new THREE.Group();
+  axleGroup = new THREE.Group();
+  externalGroup = new THREE.Group();
+  fieldLinesGroup = new THREE.Group();
+  vectorsGroup = new THREE.Group();
+  handRuleGroup = new THREE.Group();
+  labelsGroup = new THREE.Group();
+
+  scene.add(magnetGroup, coilGroup, ringsGroup, brushesGroup, axleGroup, externalGroup);
+  scene.add(fieldLinesGroup, vectorsGroup, handRuleGroup, labelsGroup);
+
+  raycaster = new THREE.Raycaster();
+  mouse = new THREE.Vector2();
+  renderer.domElement.addEventListener('pointerdown', on3DPointerDown);
+  window.addEventListener('resize', onWindowResize);
+
+  buildApparatus3D();
+}
+
+function tagClickable(mesh, compKey) {
+  mesh.userData.compKey = compKey;
+  clickableMeshes.push(mesh);
+}
+
+function clearThreeGroup(grp) {
+  while (grp.children.length > 0) {
+    const c = grp.children[0];
+    grp.remove(c);
+    if (c.geometry) c.geometry.dispose();
+  }
+}
+
+function buildApparatus3D() {
+  clickableMeshes = [];
+  currentBeadMeshes = [];
+  clearThreeGroup(magnetGroup);
+  clearThreeGroup(coilGroup);
+  clearThreeGroup(ringsGroup);
+  clearThreeGroup(brushesGroup);
+  clearThreeGroup(axleGroup);
+  clearThreeGroup(externalGroup);
+  clearThreeGroup(fieldLinesGroup);
+  clearThreeGroup(labelsGroup);
+
+  const wireMode = state.coilStyle === 'wire';
+
+  // 1. PERMANENT MAGNET POLES (North on Left -X, South on Right +X, curved concave pole faces)
+  const leftIsNorth = !state.reverseB;
+  const colLeft = leftIsNorth ? 0xef4444 : 0x3b82f6;
+  const colRight = leftIsNorth ? 0x3b82f6 : 0xef4444;
+
+  const poleGeo = new THREE.BoxGeometry(2.2, 2.6, 4.4);
+  const leftPole = new THREE.Mesh(poleGeo, new THREE.MeshPhongMaterial({ color: colLeft, wireframe: wireMode, shininess: 50 }));
+  leftPole.position.set(-3.7, 0, 0);
+  tagClickable(leftPole, 'magnets');
+  magnetGroup.add(leftPole);
+
+  const rightPole = new THREE.Mesh(poleGeo, new THREE.MeshPhongMaterial({ color: colRight, wireframe: wireMode, shininess: 50 }));
+  rightPole.position.set(3.7, 0, 0);
+  tagClickable(rightPole, 'magnets');
+  magnetGroup.add(rightPole);
+
+  const lblLeft = makeTextSprite(leftIsNorth ? 'N Pole' : 'S Pole', leftIsNorth ? '#fca5a5' : '#93c5fd', 1.1);
+  lblLeft.position.set(-3.7, 1.85, 0);
+  labelsGroup.add(lblLeft);
+
+  const lblRight = makeTextSprite(leftIsNorth ? 'S Pole' : 'N Pole', leftIsNorth ? '#93c5fd' : '#fca5a5', 1.1);
+  lblRight.position.set(3.7, 1.85, 0);
+  labelsGroup.add(lblRight);
+
+  // Uniform B-Field Lines between poles
+  const bDir = state.reverseB ? -1 : 1;
+  for (let y = -0.8; y <= 0.81; y += 0.8) {
+    for (let z = -1.5; z <= 1.51; z += 1.0) {
+      const startX = -2.4 * bDir;
+      const dirVec = new THREE.Vector3(bDir, 0, 0);
+      const arrow = new THREE.ArrowHelper(dirVec, new THREE.Vector3(startX, y, z), 4.8, 0x38bdf8, 0.35, 0.18);
+      fieldLinesGroup.add(arrow);
+    }
+  }
+
+  // 2. ROTATING RECTANGULAR COIL ABCD (Mounted on Z-axis shaft from z = -1.8 to z = +1.8)
+  const halfW = state.coilWidth / 2;
+  const halfL = state.coilLength / 2;
+  const copperMat = new THREE.MeshPhongMaterial({ color: 0xd97706, wireframe: wireMode, shininess: 90 });
+  const armABMat = new THREE.MeshPhongMaterial({ color: 0xf97316, wireframe: wireMode, shininess: 90 }); // Side AB (-X at θ=0)
+  const armCDMat = new THREE.MeshPhongMaterial({ color: 0x06b6d4, wireframe: wireMode, shininess: 90 }); // Side CD (+X at θ=0)
+
+  const tubeR = 0.08 + Math.min(0.06, state.N * 0.003);
+  // Active Arm AB (at local x = -halfW, spans z from -halfL to +halfL)
+  const armAB = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, state.coilLength, 16), armABMat);
+  armAB.rotation.x = Math.PI / 2;
+  armAB.position.set(-halfW, 0, 0);
+  tagClickable(armAB, 'coil');
+  coilGroup.add(armAB);
+
+  // Active Arm CD (at local x = +halfW, spans z from -halfL to +halfL)
+  const armCD = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, state.coilLength, 16), armCDMat);
+  armCD.rotation.x = Math.PI / 2;
+  armCD.position.set(halfW, 0, 0);
+  tagClickable(armCD, 'coil');
+  coilGroup.add(armCD);
+
+  // Back End BC (at z = -halfL)
+  const armBC = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, state.coilWidth, 16), copperMat);
+  armBC.rotation.z = Math.PI / 2;
+  armBC.position.set(0, 0, -halfL);
+  tagClickable(armBC, 'coil');
+  coilGroup.add(armBC);
+
+  // Front End segments DA1 and DA2 (at z = +halfL, leading into axial commutator/slip-ring leads)
+  const segLen = halfW - 0.32;
+  const armDA1 = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, segLen, 14), armABMat);
+  armDA1.rotation.z = Math.PI / 2;
+  armDA1.position.set(-halfW + segLen / 2, 0, halfL);
+  coilGroup.add(armDA1);
+
+  const armDA2 = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, segLen, 14), armCDMat);
+  armDA2.rotation.z = Math.PI / 2;
+  armDA2.position.set(halfW - segLen / 2, 0, halfL);
+  coilGroup.add(armDA2);
+
+  // 3. CENTRAL AXLE & MECHANICAL CRANK (Generator) OR PULLEY LOAD (Motor)
+  const shaftMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.11, 0.11, 8.2, 18),
+    new THREE.MeshPhongMaterial({ color: 0x64748b, shininess: 80 })
+  );
+  shaftMesh.rotation.x = Math.PI / 2;
+  shaftMesh.position.set(0, 0, 0.2);
+  tagClickable(shaftMesh, 'axle');
+  axleGroup.add(shaftMesh);
+
+  if (state.mode === 'generator') {
+    // External Hand Crank at back of axle (z = -3.8)
+    crankGroup = new THREE.Group();
+    const crankArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.4, 0.18), new THREE.MeshPhongMaterial({ color: 0x94a3b8 }));
+    crankArm.position.set(0, 0.6, -3.8);
+    const crankHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.9, 16), new THREE.MeshPhongMaterial({ color: 0x00f59b }));
+    crankHandle.rotation.x = Math.PI / 2;
+    crankHandle.position.set(0, 1.2, -4.2);
+    tagClickable(crankArm, 'axle');
+    tagClickable(crankHandle, 'axle');
+    crankGroup.add(crankArm, crankHandle);
+    axleGroup.add(crankGroup);
+  } else {
+    // Mechanical Shaft Load Pulley at back of axle (z = -3.6)
+    pulleyGroup = new THREE.Group();
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.3, 28), new THREE.MeshPhongMaterial({ color: 0xf59e0b }));
+    wheel.rotation.x = Math.PI / 2;
+    wheel.position.set(0, 0, -3.6);
+    tagClickable(wheel, 'axle');
+    pulleyGroup.add(wheel);
+    axleGroup.add(pulleyGroup);
+  }
+
+  // 4. ELECTRICAL CONNECTION RINGS: SLIP RINGS (AC GEN) VS SPLIT-RING COMMUTATOR (DC GEN & MOTOR)
+  const useSlipRings = (state.mode === 'generator' && state.genType === 'AC');
+  const ringMat1 = new THREE.MeshPhongMaterial({ color: 0xfbbf24, shininess: 100, side: THREE.DoubleSide });
+  const ringMat2 = new THREE.MeshPhongMaterial({ color: 0x38bdf8, shininess: 100, side: THREE.DoubleSide });
+
+  if (useSlipRings) {
+    // TWO CONTINUOUS COAXIAL SLIP RINGS at z = 2.55 and z = 3.25
+    const r1 = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.36, 36, 1, true), ringMat1);
+    r1.rotation.x = Math.PI / 2;
+    r1.position.set(0, 0, 2.55);
+    tagClickable(r1, 'rings');
+    ringsGroup.add(r1);
+
+    const r2 = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.36, 36, 1, true), ringMat2);
+    r2.rotation.x = Math.PI / 2;
+    r2.position.set(0, 0, 3.25);
+    tagClickable(r2, 'rings');
+    ringsGroup.add(r2);
+
+    // Lead wires connecting Arm AB to Ring 1 and Arm CD to Ring 2
+    const lead1 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.0, 10), armABMat);
+    lead1.rotation.x = Math.PI / 2;
+    lead1.position.set(-0.32, 0, 2.05);
+    ringsGroup.add(lead1);
+
+    const lead2 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.7, 10), armCDMat);
+    lead2.rotation.x = Math.PI / 2;
+    lead2.position.set(0.32, 0, 2.4);
+    ringsGroup.add(lead2);
+
+    // Stationary Carbon Brushes B1 (touching Ring 1 at z=2.55) and B2 (touching Ring 2 at z=3.25)
+    const bGeo = new THREE.BoxGeometry(0.45, 0.32, 0.32);
+    const bMat = new THREE.MeshPhongMaterial({ color: 0x334155 });
+    const brush1 = new THREE.Mesh(bGeo, bMat);
+    brush1.position.set(-0.76, 0, 2.55);
+    tagClickable(brush1, 'brushes');
+    brushesGroup.add(brush1);
+
+    const brush2 = new THREE.Mesh(bGeo, bMat);
+    brush2.position.set(0.76, 0, 3.25);
+    tagClickable(brush2, 'brushes');
+    brushesGroup.add(brush2);
+  } else {
+    // SPLIT-RING COMMUTATOR (Two 160° cylindrical halves C1 & C2 at z = 2.85 separated by a clear insulating air gap)
+    const halfArc = Math.PI * 0.82;
+    const c1Geo = new THREE.CylinderGeometry(0.56, 0.56, 0.58, 28, 1, true, -halfArc / 2, halfArc);
+    c1Geo.rotateZ(Math.PI / 2);
+    c1Geo.rotateX(Math.PI / 2);
+    const c1Mesh = new THREE.Mesh(c1Geo, ringMat1);
+    c1Mesh.position.set(0, 0, 2.85);
+    tagClickable(c1Mesh, 'rings');
+    ringsGroup.add(c1Mesh);
+
+    const c2Geo = new THREE.CylinderGeometry(0.56, 0.56, 0.58, 28, 1, true, Math.PI - halfArc / 2, halfArc);
+    c2Geo.rotateZ(Math.PI / 2);
+    c2Geo.rotateX(Math.PI / 2);
+    const c2Mesh = new THREE.Mesh(c2Geo, ringMat2);
+    c2Mesh.position.set(0, 0, 2.85);
+    tagClickable(c2Mesh, 'rings');
+    ringsGroup.add(c2Mesh);
+
+    // Lead wires from Arm AB and Arm CD to split-ring halves C1 and C2
+    const lead1 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.25, 10), armABMat);
+    lead1.rotation.x = Math.PI / 2;
+    lead1.position.set(-0.35, 0, 2.2);
+    ringsGroup.add(lead1);
+
+    const lead2 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.25, 10), armCDMat);
+    lead2.rotation.x = Math.PI / 2;
+    lead2.position.set(0.35, 0, 2.2);
+    ringsGroup.add(lead2);
+
+    // Stationary Carbon Brushes B1 (-X) and B2 (+X) pressing against the split-ring at z = 2.85
+    const bGeo = new THREE.BoxGeometry(0.48, 0.34, 0.38);
+    const bMat = new THREE.MeshPhongMaterial({ color: 0x334155 });
+    const brush1 = new THREE.Mesh(bGeo, bMat);
+    brush1.position.set(-0.78, 0, 2.85);
+    tagClickable(brush1, 'brushes');
+    brushesGroup.add(brush1);
+
+    const brush2 = new THREE.Mesh(bGeo, bMat);
+    brush2.position.set(0.78, 0, 2.85);
+    tagClickable(brush2, 'brushes');
+    brushesGroup.add(brush2);
+  }
+
+  const lblB1 = makeTextSprite('Brush B₁', '#cbd5e1', 0.8);
+  lblB1.position.set(-1.55, 0.5, 2.85);
+  labelsGroup.add(lblB1);
+  const lblB2 = makeTextSprite('Brush B₂', '#cbd5e1', 0.8);
+  lblB2.position.set(1.55, 0.5, 2.85);
+  labelsGroup.add(lblB2);
+
+  // 5. EXTERNAL CIRCUIT: WIRES + BULB LOAD (GENERATOR) OR DC BATTERY SUPPLY (MOTOR)
+  const wireMat = new THREE.MeshPhongMaterial({ color: 0x475569 });
+  const zFront = 5.4;
+  const zB1 = useSlipRings ? 2.55 : 2.85;
+  const zB2 = useSlipRings ? 3.25 : 2.85;
+
+  // Wire paths from B1 (-0.95, 0, zB1) and B2 (+0.95, 0, zB2) to front station (z = 5.4)
+  const wLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, zFront - zB1, 10), wireMat);
+  wLeft.rotation.x = Math.PI / 2;
+  wLeft.position.set(-0.95, -0.5, (zFront + zB1) / 2);
+  externalGroup.add(wLeft);
+
+  const wRight = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, zFront - zB2, 10), wireMat);
+  wRight.rotation.x = Math.PI / 2;
+  wRight.position.set(0.95, -0.5, (zFront + zB2) / 2);
+  externalGroup.add(wRight);
+
+  if (state.mode === 'generator') {
+    // Light Bulb & Load Resistor Assembly at (0, -0.5, 5.4)
+    const socket = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.5, 0.6, 20), new THREE.MeshPhongMaterial({ color: 0x64748b }));
+    socket.position.set(0, -0.5, zFront);
+    tagClickable(socket, 'external');
+    externalGroup.add(socket);
+
+    bulbGlassMat = new THREE.MeshPhongMaterial({
+      color: 0xfffbeb,
+      emissive: 0xfbbf24,
+      emissiveIntensity: 0.05,
+      transparent: true,
+      opacity: 0.85
+    });
+    const bulbGlobe = new THREE.Mesh(new THREE.SphereGeometry(0.62, 24, 24), bulbGlassMat);
+    bulbGlobe.position.set(0, 0.25, zFront);
+    tagClickable(bulbGlobe, 'external');
+    externalGroup.add(bulbGlobe);
+
+    bulbPointLight = new THREE.PointLight(0xfbbf24, 0, 8);
+    bulbPointLight.position.set(0, 0.4, zFront);
+    externalGroup.add(bulbPointLight);
+
+    const lblLoad = makeTextSprite(`Load Bulb (${state.R_load} Ω)`, '#fde68a', 0.9);
+    lblLoad.position.set(0, 1.3, zFront);
+    labelsGroup.add(lblLoad);
+  } else {
+    // DC Power Supply / Battery Pack at (0, -0.4, 5.4)
+    const batBody = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.1, 1.0), new THREE.MeshPhongMaterial({ color: 0x1e293b }));
+    batBody.position.set(0, -0.4, zFront);
+    tagClickable(batBody, 'external');
+    externalGroup.add(batBody);
+
+    const leftPos = !state.reverseV;
+    const tLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.35, 14), new THREE.MeshBasicMaterial({ color: leftPos ? 0xef4444 : 0x3b82f6 }));
+    tLeft.position.set(-0.6, 0.3, zFront);
+    const tRight = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.35, 14), new THREE.MeshBasicMaterial({ color: leftPos ? 0x3b82f6 : 0xef4444 }));
+    tRight.position.set(0.6, 0.3, zFront);
+    externalGroup.add(tLeft, tRight);
+
+    const lblBat = makeTextSprite(`DC Supply (${state.V_supply.toFixed(1)} V)`, '#ffbe0b', 0.9);
+    lblBat.position.set(0, 1.2, zFront);
+    labelsGroup.add(lblBat);
+  }
+
+  applyExplodedPositions();
+  syncVisibility();
+}
+
+/* ============================================================================
+   4. DYNAMIC 3D VECTORS (FORCES F_AB, F_CD, AREA NORMAL, CURRENT & 3D HAND RULE)
+   ============================================================================ */
+function update3DSceneFromPhysics(phys) {
+  // Rotate Coil, Rings, and Axle about Z-axis by angle theta
+  // Note: At theta = 0, coil is in YZ plane so normal n̂ points along +X (parallel to B).
+  // Wait: in our geometry, arms AB and CD were built at (-halfW, 0, z) and (+halfW, 0, z), which lies in the XZ plane!
+  // When in XZ plane, its normal is along +Y, so rotating by (theta - PI/2) puts normal along +X at theta = 0!
+  const rotZ = phys.theta - Math.PI / 2;
+  coilGroup.rotation.z = rotZ;
+  ringsGroup.rotation.z = rotZ;
+  axleGroup.rotation.z = rotZ;
+
+  // Update Bulb Glow in Generator Mode
+  if (state.mode === 'generator' && bulbGlassMat && bulbPointLight) {
+    const glow = Math.min(2.5, phys.powerOut * 0.45);
+    bulbGlassMat.emissiveIntensity = 0.06 + glow;
+    bulbPointLight.intensity = glow * 1.4;
+  }
+
+  clearThreeGroup(vectorsGroup);
+  clearThreeGroup(handRuleGroup);
+
+  const halfW = state.coilWidth / 2;
+  // World positions of active Arm AB and Arm CD centers
+  const posAB = new THREE.Vector3(-halfW, 0, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), rotZ);
+  const posCD = new THREE.Vector3(halfW, 0, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), rotZ);
+
+  // 1. Area Normal Vector n̂ (at θ = 0, points along +X)
+  if (document.getElementById('chk-area-vec').checked) {
+    const nDir = new THREE.Vector3(Math.cos(phys.theta), Math.sin(phys.theta), 0).normalize();
+    const nArrow = new THREE.ArrowHelper(nDir, new THREE.Vector3(0, 0, 0), 1.8, 0xa855f7, 0.35, 0.2);
+    vectorsGroup.add(nArrow);
+  }
+
+  // 2. Conventional Current Arrows on Arm AB, Arm CD, and External Wires
+  if (document.getElementById('chk-current').checked && Math.abs(phys.currentCoil) > 0.02) {
+    const cSign = Math.sign(phys.currentCoil);
+    const cDirAB = new THREE.Vector3(0, 0, -cSign); // Along -Z or +Z on Arm AB
+    const cDirCD = new THREE.Vector3(0, 0, cSign);  // Opposite direction on Arm CD
+    vectorsGroup.add(new THREE.ArrowHelper(cDirAB, posAB.clone().sub(cDirAB.clone().multiplyScalar(0.8)), 1.6, 0xfacc15, 0.38, 0.22));
+    vectorsGroup.add(new THREE.ArrowHelper(cDirCD, posCD.clone().sub(cDirCD.clone().multiplyScalar(0.8)), 1.6, 0xfacc15, 0.38, 0.22));
+
+    // External wire current arrow
+    if (Math.abs(phys.currentExt) > 0.02) {
+      const extSign = Math.sign(phys.currentExt);
+      const extDir = new THREE.Vector3(0, 0, extSign);
+      vectorsGroup.add(new THREE.ArrowHelper(extDir, new THREE.Vector3(-0.95, -0.35, 4.1), 1.2, 0xfacc15, 0.32, 0.18));
+    }
+  }
+
+  // 3. Magnetic Forces F_AB and F_CD on the Two Active Arms (Cross Product F = I (L × B))
+  if (document.getElementById('chk-forces').checked && Math.abs(phys.currentCoil) > 0.02) {
+    // Current vector along Arm AB is (0, 0, -cSign), B is (B_signed, 0, 0)
+    // (0, 0, -cSign) × (B_signed, 0, 0) = (0, -cSign * B_signed, 0) -> Vertical Force (±Y)!
+    const fVal = phys.currentCoil * phys.B_signed;
+    const fLen = Math.min(2.4, Math.max(0.55, Math.abs(fVal) * 0.45));
+    const fDirAB = new THREE.Vector3(0, -Math.sign(fVal), 0);
+    const fDirCD = new THREE.Vector3(0, Math.sign(fVal), 0);
+
+    vectorsGroup.add(new THREE.ArrowHelper(fDirAB, posAB, fLen, 0xf97316, 0.42, 0.24));
+    vectorsGroup.add(new THREE.ArrowHelper(fDirCD, posCD, fLen, 0xf97316, 0.42, 0.24));
+  }
+
+  // 4. Interactive 3D Fleming Hand Rule Tri-Vector Indicator at Arm AB
+  if (document.getElementById('chk-hand-rule').checked) {
+    const origin = posAB.clone().add(new THREE.Vector3(0, 0, -1.6));
+    const bVec = new THREE.Vector3(Math.sign(phys.B_signed), 0, 0);
+    const cSign = Math.sign(phys.currentCoil) || 1;
+    const iVec = new THREE.Vector3(0, 0, -cSign);
+    const fVec = new THREE.Vector3(0, -cSign * Math.sign(phys.B_signed), 0);
+
+    handRuleGroup.add(new THREE.ArrowHelper(bVec, origin, 1.4, 0x38bdf8, 0.3, 0.18)); // Index: B
+    handRuleGroup.add(new THREE.ArrowHelper(iVec, origin, 1.4, 0xfacc15, 0.3, 0.18)); // Middle: I
+    if (!state.flemingChallengeMode || state.flemingGuessed) {
+      handRuleGroup.add(new THREE.ArrowHelper(fVec, origin, 1.4, 0xf97316, 0.3, 0.18)); // Thumb: F
+    }
+  }
+}
+
+/* ============================================================================
+   5. SYNCHRONIZED REAL-TIME OSCILLOSCOPE & TELEMETRY RENDERER
+   ============================================================================ */
+function updateTelemetryAndOscilloscope(phys) {
+  const deg = ((phys.theta * 180 / Math.PI) % 360 + 360) % 360;
+  const rpm = (phys.omega * 60) / (2 * Math.PI);
+
+  // Push history point
+  state.history.push({
+    flux: phys.flux,
+    emf: phys.emfTerminal,
+    curr: phys.currentExt,
+    tau: phys.tauMag
+  });
+  if (state.history.length > 240) state.history.shift();
+
+  // 1. Left Telemetry Card
+  const telEl = document.getElementById('telemetry-box');
+  if (state.mode === 'generator') {
+    telEl.innerHTML = `
+      <div style="color:var(--gen-col); font-weight:700; margin-bottom:2px;">⚡ GENERATOR LIVE TELEMETRY (${state.genType})</div>
+      <div class="tel-row"><span>Coil Angle θ (B to n̂):</span><span class="v">${deg.toFixed(1)}°</span></div>
+      <div class="tel-row"><span>Angular Speed ω:</span><span class="v">${phys.omega.toFixed(2)} rad/s (${rpm.toFixed(0)} RPM)</span></div>
+      <div class="tel-row"><span>Magnetic Flux Φ_B:</span><span class="v">${phys.flux.toFixed(3)} Wb</span></div>
+      <div class="tel-row"><span>Output EMF ε:</span><span class="v">${phys.emfTerminal.toFixed(2)} V</span></div>
+      <div class="tel-row"><span>Load Current I:</span><span class="v">${phys.currentExt.toFixed(2)} A</span></div>
+      <div class="tel-row"><span>Lenz Opposing Torque τ:</span><span class="v">${Math.abs(phys.tauMag).toFixed(2)} N·m</span></div>
+    `;
+  } else {
+    telEl.innerHTML = `
+      <div style="color:var(--mot-col); font-weight:700; margin-bottom:2px;">⚙️ DC MOTOR LIVE TELEMETRY</div>
+      <div class="tel-row"><span>Coil Angle θ (B to n̂):</span><span class="v">${deg.toFixed(1)}°</span></div>
+      <div class="tel-row"><span>Shaft Speed ω:</span><span class="v">${phys.omega.toFixed(2)} rad/s (${rpm.toFixed(0)} RPM)</span></div>
+      <div class="tel-row"><span>Supply V / Back-EMF E_b:</span><span class="v">${phys.emfTerminal.toFixed(1)}V / ${phys.eBack.toFixed(2)}V</span></div>
+      <div class="tel-row"><span>Armature Current I:</span><span class="v">${phys.currentExt.toFixed(2)} A</span></div>
+      <div class="tel-row"><span>Driving Torque τ_motor:</span><span class="v">${phys.tauMag.toFixed(2)} N·m</span></div>
+      <div class="tel-row"><span>Load Torque τ_load:</span><span class="v">${state.tauLoad.toFixed(2)} N·m</span></div>
+    `;
+  }
+
+  // 2. Right Energy Conversion Card
+  const enEl = document.getElementById('energy-box');
+  if (state.mode === 'generator') {
+    enEl.innerHTML = `
+      <div style="color:var(--accent); font-weight:700;">REAL-TIME ENERGY FLOW (FARADAY + LENZ)</div>
+      <div class="energy-pipe">
+        <div class="energy-node" style="color:#00f59b">Mech In<br>${phys.powerIn.toFixed(2)} W</div>
+        <div>──►</div>
+        <div class="energy-node" style="color:#facc15">Load Out<br>${phys.powerOut.toFixed(2)} W</div>
+        <div>+</div>
+        <div class="energy-node" style="color:#f87171">I²R Heat<br>${phys.powerLoss.toFixed(2)} W</div>
+      </div>
+      <div class="tel-row"><span>Electrical Efficiency η:</span><span class="v">${state.circuitClosed ? phys.efficiency.toFixed(1) + '%' : 'Open Circuit (0 W)'}</span></div>
+      <div style="font-size:10px; color:var(--text-muted);">
+        ${state.circuitClosed ? 'Lenz\'s Law: Induced current creates opposing torque τ_Lenz requiring mechanical work!' : 'Open Circuit: EMF is induced across brushes, but I = 0 so opposing Lenz torque = 0.'}
+      </div>
+    `;
+  } else {
+    const overheated = Math.abs(phys.currentExt) > 4.8;
+    enEl.innerHTML = `
+      <div style="color:var(--mot-col); font-weight:700;">REAL-TIME ENERGY FLOW &amp; BACK-EMF</div>
+      <div class="energy-pipe">
+        <div class="energy-node" style="color:#ffbe0b">Elec In (VI)<br>${phys.powerIn.toFixed(2)} W</div>
+        <div>──►</div>
+        <div class="energy-node" style="color:#00f59b">Shaft (τω)<br>${phys.powerOut.toFixed(2)} W</div>
+        <div>+</div>
+        <div class="energy-node" style="color:#f87171">I²R Heat<br>${phys.powerLoss.toFixed(2)} W</div>
+      </div>
+      <div class="tel-row"><span>Motor Efficiency η:</span><span class="v">${phys.efficiency.toFixed(1)}%</span></div>
+      <div style="font-size:10px; color:${overheated ? '#fca5a5' : 'var(--text-muted)'};">
+        ${overheated ? '⚠️ High Current / Heavy Load: Low speed reduces E_back, causing large armature current I = (V−E_b)/R!' : 'V = I·R + E_back: Rising speed ω increases E_back and self-regulates current I.'}
+      </div>
+    `;
+  }
+
+  // 3. Center Synchronized Oscilloscope Canvas
+  const canvas = document.getElementById('oscilloscope-canvas');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = '#05080f';
+  ctx.fillRect(0, 0, w, h);
+
+  // Center zero line
+  ctx.strokeStyle = '#1e2c47';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, h / 2);
+  ctx.lineTo(w, h / 2);
+  ctx.stroke();
+
+  const plotTrace = (key, scaleFactor, color) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    state.history.forEach((pt, idx) => {
+      const sx = (idx / 240) * w;
+      const sy = h / 2 - pt[key] * scaleFactor;
+      if (idx === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    });
+    ctx.stroke();
+  };
+
+  if (state.mode === 'generator') {
+    plotTrace('flux', 55, '#38bdf8');
+    plotTrace('emf', 3.2, '#00f59b');
+    plotTrace('curr', 18, '#facc15');
+    ctx.font = 'bold 10.5px JetBrains Mono, monospace';
+    ctx.fillStyle = '#38bdf8'; ctx.fillText('─── Flux Φ(t) = BA cos θ', 10, 15);
+    ctx.fillStyle = '#00f59b'; ctx.fillText('─── Induced EMF ε(t)', 185, 15);
+    ctx.fillStyle = '#facc15'; ctx.fillText('─── Current I(t) = ε/R', 345, 15);
+  } else {
+    plotTrace('curr', 10, '#facc15');
+    plotTrace('tau', 18, '#f97316');
+    plotTrace('flux', 50, '#38bdf8');
+    ctx.font = 'bold 10.5px JetBrains Mono, monospace';
+    ctx.fillStyle = '#facc15'; ctx.fillText('─── Armature Current I(t)', 10, 15);
+    ctx.fillStyle = '#f97316'; ctx.fillText('─── Motor Torque τ(t)', 200, 15);
+    ctx.fillStyle = '#38bdf8'; ctx.fillText('─── Flux Φ(t)', 365, 15);
+  }
+  ctx.restore();
+}
+
+/* ============================================================================
+   6. RIGHT-HAND PANEL CONTROLS BUILDER (GENERATOR VS MOTOR)
+   ============================================================================ */
+function buildRightControls() {
+  const container = document.getElementById('dynamic-right-controls');
+  if (state.mode === 'generator') {
+    container.innerHTML = `
+      <div class="panel-sec">
+        <div class="sec-title"><span>Generator Type (AC vs Elementary DC)</span></div>
+        <div style="display:flex; gap:5px; margin-bottom:6px;">
+          <button class="btn-sm ${state.genType==='AC'?'active-toggle':''}" style="flex:1;" onclick="setGenType('AC')">AC (2 Slip Rings)</button>
+          <button class="btn-sm ${state.genType==='DC'?'active-toggle':''}" style="flex:1;" onclick="setGenType('DC')">DC (Split-Ring)</button>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">
+          ${state.genType === 'AC'
+            ? '<strong>Slip Rings:</strong> Each ring stays connected to the same coil arm, delivering sinusoidal alternating EMF and reversing current every 180°.'
+            : '<strong>Split-Ring Commutator:</strong> Reverses brush contact every 180° when sin θ = 0, producing unidirectional pulsating DC (practical DC generators use multiple coils to smooth ripples).'}
+        </div>
+      </div>
+
+      <div class="panel-sec">
+        <div class="sec-title"><span>Mechanical &amp; Magnetic Controls</span></div>
+        <div class="slider-row">
+          <div class="slider-head"><span>Crank Angular Speed (ω)</span><span class="val">${state.omegaDrive.toFixed(1)} rad/s</span></div>
+          <input type="range" min="0.5" max="10" step="0.5" value="${state.omegaDrive}" oninput="state.omegaDrive=parseFloat(this.value); buildRightControls()">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><span>Magnetic Field Strength (B)</span><span class="val">${state.B.toFixed(1)} T</span></div>
+          <input type="range" min="0.2" max="2.5" step="0.1" value="${state.B}" oninput="state.B=parseFloat(this.value); buildRightControls()">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><span>Number of Coil Turns (N)</span><span class="val">${state.N} turns</span></div>
+          <input type="range" min="1" max="30" step="1" value="${state.N}" oninput="state.N=parseInt(this.value); buildRightControls()">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><span>Coil Width (Area A = ${(state.coilWidth*state.coilLength*0.05).toFixed(2)} m²)</span><span class="val">${state.coilWidth.toFixed(1)}</span></div>
+          <input type="range" min="1.4" max="3.2" step="0.2" value="${state.coilWidth}" oninput="state.coilWidth=parseFloat(this.value); buildApparatus3D(); buildRightControls()">
+        </div>
+        <button class="btn-sm" style="width:100%;" onclick="state.reverseB=!state.reverseB; buildApparatus3D()">⇄ Reverse Magnetic Field Poles (N ↔ S)</button>
+      </div>
+
+      <div class="panel-sec" style="border-bottom:none;">
+        <div class="sec-title"><span>Lenz's Law &amp; Electrical Load Controls</span></div>
+        <div style="display:flex; gap:4px; margin-bottom:8px;">
+          <button class="btn-sm ${!state.circuitClosed?'active-toggle':''}" style="flex:1;" onclick="setLenzPreset('open')">Open Circuit</button>
+          <button class="btn-sm ${state.circuitClosed && state.R_load>=10?'active-toggle':''}" style="flex:1;" onclick="setLenzPreset('light')">Light Load</button>
+          <button class="btn-sm ${state.circuitClosed && state.R_load<10?'active-toggle':''}" style="flex:1;" onclick="setLenzPreset('heavy')">Heavy Load</button>
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><span>Load Resistance (R_load)</span><span class="val">${state.R_load.toFixed(1)} Ω</span></div>
+          <input type="range" min="1.0" max="25.0" step="0.5" value="${state.R_load}" oninput="state.R_load=parseFloat(this.value); state.circuitClosed=true; buildApparatus3D(); buildRightControls()">
+        </div>
+        <div class="formula-box">
+          Faraday's Law: ε = −N dΦ/dt = NBAω sin θ<br>
+          Lenz's Law: I = ε / (R_load + R_coil)<br>
+          Opposing Torque: τ_Lenz = N I A B sin θ
+        </div>
+      </div>
+    `;
+  } else {
+    container.innerHTML = `
+      <div class="panel-sec">
+        <div class="sec-title"><span>DC Motor Electrical &amp; Field Controls</span></div>
+        <div class="slider-row">
+          <div class="slider-head"><span>DC Supply Voltage (V)</span><span class="val">${state.V_supply.toFixed(1)} V</span></div>
+          <input type="range" min="0" max="24" step="0.5" value="${state.V_supply}" oninput="state.V_supply=parseFloat(this.value); buildApparatus3D(); buildRightControls()">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><span>Magnetic Field Strength (B)</span><span class="val">${state.B.toFixed(1)} T</span></div>
+          <input type="range" min="0.2" max="2.5" step="0.1" value="${state.B}" oninput="state.B=parseFloat(this.value); buildRightControls()">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><span>Number of Coil Turns (N)</span><span class="val">${state.N} turns</span></div>
+          <input type="range" min="1" max="30" step="1" value="${state.N}" oninput="state.N=parseInt(this.value); buildRightControls()">
+        </div>
+        <div class="slider-row">
+          <div class="slider-head"><span>Armature Resistance (R)</span><span class="val">${state.R_coil.toFixed(1)} Ω</span></div>
+          <input type="range" min="0.5" max="8.0" step="0.5" value="${state.R_coil}" oninput="state.R_coil=parseFloat(this.value); buildRightControls()">
+        </div>
+        <div style="display:flex; gap:5px; margin-bottom:4px;">
+          <button class="btn-sm" style="flex:1;" onclick="state.reverseV=!state.reverseV; buildApparatus3D()">⇄ Reverse Current (V)</button>
+          <button class="btn-sm" style="flex:1;" onclick="state.reverseB=!state.reverseB; buildApparatus3D()">⇄ Reverse Field (B)</button>
+        </div>
+      </div>
+
+      <div class="panel-sec">
+        <div class="sec-title"><span>Back-EMF &amp; Mechanical Shaft Loading</span></div>
+        <div class="slider-row">
+          <div class="slider-head"><span>Mechanical Load Torque (τ_load)</span><span class="val">${state.tauLoad.toFixed(2)} N·m</span></div>
+          <input type="range" min="0" max="3.0" step="0.1" value="${state.tauLoad}" oninput="state.tauLoad=parseFloat(this.value); buildRightControls()">
+        </div>
+        <div style="display:flex; gap:4px; margin-bottom:6px;">
+          <button class="btn-sm" style="flex:1;" onclick="state.omegaMotor=0; state.thetaRad=Math.PI/2;">Case 1: Start (ω=0)</button>
+          <button class="btn-sm" style="flex:1;" onclick="state.tauLoad=0.1; buildRightControls()">Case 2: No Load</button>
+          <button class="btn-sm" style="flex:1;" onclick="state.tauLoad=2.2; buildRightControls()">Case 3: Heavy Load</button>
+        </div>
+        <label class="chk-lbl"><input type="checkbox" ${state.currentLimiterOn?'checked':''} onchange="state.currentLimiterOn=this.checked; buildRightControls()"> Enable Current Limiter (I_max = 6 A)</label>
+        <div class="formula-box">
+          Force per Arm: F = B I L<br>
+          Torque: τ = N I A B |sin θ|<br>
+          Back-EMF Equation: V = I·R + E_back (E_back = k_e ω)
+        </div>
+      </div>
+
+      <div class="panel-sec" style="border-bottom:none;">
+        <div class="sec-title"><span>Fleming's Left-Hand Rule Challenge</span></div>
+        <p style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">
+          Enable "3D Fleming Hand" on the left panel. Predict the force direction on Arm AB (orange) when Current or Field is reversed!
+        </p>
+        <button class="btn-sm" style="width:100%;" onclick="document.getElementById('chk-hand-rule').checked=true; syncVisibility();">✋ Show 3D Fleming Left-Hand Triad on Arm AB</button>
+      </div>
+    `;
+  }
+}
+
+/* ============================================================================
+   7. UI INTERACTION HANDLERS & MODAL VIEWS (COMPARISON, GUIDED, QUIZ)
+   ============================================================================ */
+function switchPrimaryMode(newMode) {
+  closeModalView();
+  state.mode = newMode;
+  state.history = [];
+  if (newMode === 'motor') {
+    state.omegaMotor = 1.5;
+    state.thetaRad = Math.PI / 3;
+  }
+  document.getElementById('pill-generator').className = 'mode-pill' + (newMode === 'generator' ? ' active-gen' : '');
+  document.getElementById('pill-motor').className = 'mode-pill' + (newMode === 'motor' ? ' active-mot' : '');
+  document.getElementById('pill-compare').className = 'mode-pill';
+  document.getElementById('pill-guided').className = 'mode-pill';
+  document.getElementById('pill-quiz').className = 'mode-pill';
+
+  buildApparatus3D();
+  buildRightControls();
+}
+
+function setGenType(type) {
+  state.genType = type;
+  state.history = [];
+  buildApparatus3D();
+  buildRightControls();
+}
+
+function setLenzPreset(preset) {
+  if (preset === 'open') {
+    state.circuitClosed = false;
+  } else if (preset === 'light') {
+    state.circuitClosed = true;
+    state.R_load = 16.0;
+  } else if (preset === 'heavy') {
+    state.circuitClosed = true;
+    state.R_load = 2.0;
+  }
+  buildApparatus3D();
+  buildRightControls();
+}
+
+function selectComponent(compKey) {
+  state.selectedComp = compKey;
+  document.querySelectorAll('.comp-btn').forEach(b => b.classList.remove('selected'));
+  const btn = document.getElementById(`cbtn-${compKey}`);
+  if (btn) btn.classList.add('selected');
+
+  const info = COMP_INFO[compKey];
+  if (info) {
+    document.getElementById('comp-title').textContent = info.title;
+    document.getElementById('comp-purpose').innerHTML = `<strong>Purpose:</strong> ${info.purpose}`;
+    document.getElementById('comp-removed').innerHTML = `<strong>What If Removed/Replaced:</strong> ${info.removed}`;
+  }
+}
+
+function on3DPointerDown(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(clickableMeshes, false);
+  if (hits.length > 0 && hits[0].object.userData.compKey) {
+    selectComponent(hits[0].object.userData.compKey);
+  }
+}
+
+function setCoilStyle(style) {
+  state.coilStyle = style;
+  document.getElementById('style-solid').classList.toggle('active-toggle', style === 'solid');
+  document.getElementById('style-wire').classList.toggle('active-toggle', style === 'wire');
+  buildApparatus3D();
+}
+
+function toggleExplodedView() {
+  const next = state.explodeFactor > 0.1 ? 0 : 100;
+  document.getElementById('rng-explode').value = next;
+  onExplodeSlider(next);
+}
+
+function onExplodeSlider(val) {
+  state.explodeFactor = parseFloat(val) / 100;
+  document.getElementById('val-explode').textContent = `${val}%`;
+  document.getElementById('style-exploded').classList.toggle('active-toggle', state.explodeFactor > 0.1);
+  applyExplodedPositions();
+}
+
+function applyExplodedPositions() {
+  const f = state.explodeFactor;
+  magnetGroup.position.set(0, f * 1.4, 0);
+  ringsGroup.position.set(0, 0, f * 1.6);
+  brushesGroup.position.set(0, -f * 1.0, f * 1.6);
+  externalGroup.position.set(0, 0, f * 2.6);
+}
+
+function syncVisibility() {
+  fieldLinesGroup.visible = document.getElementById('chk-bfield').checked;
+  labelsGroup.visible = document.getElementById('chk-3d-labels').checked;
+}
+
+function toggleRun() {
+  state.running = !state.running;
+  const btn = document.getElementById('btn-run');
+  btn.textContent = state.running ? '⏸ Pause' : '▶ Start / Resume';
+  btn.classList.toggle('active-toggle', state.running);
+}
+
+function toggleSlowMo() {
+  state.slowMo = !state.slowMo;
+  document.getElementById('btn-slowmo').classList.toggle('active-toggle', state.slowMo);
+}
+
+function stepAngle(degStep) {
+  state.running = false;
+  document.getElementById('btn-run').textContent = '▶ Start / Resume';
+  document.getElementById('btn-run').classList.remove('active-toggle');
+  state.thetaRad = (state.thetaRad + (degStep * Math.PI) / 180) % (2 * Math.PI);
+}
+
+function setCoilAngleDeg(deg) {
+  state.running = false;
+  document.getElementById('btn-run').textContent = '▶ Start / Resume';
+  document.getElementById('btn-run').classList.remove('active-toggle');
+  state.thetaRad = (deg * Math.PI) / 180;
+}
+
+function setCameraView(preset) {
+  if (preset === 'commutator') {
+    controls.target.set(0, 0, 2.85);
+    camera.position.set(0, 2.2, 6.2);
+  } else if (preset === 'top') {
+    controls.target.set(0, 0, 1.2);
+    camera.position.set(0, 16, 1.21);
+  } else if (preset === 'front') {
+    controls.target.set(0, 0, 1.2);
+    camera.position.set(0, 0.5, 15);
+  } else {
+    controls.target.set(0, 0, 1.2);
+    camera.position.set(0, 7.5, 13.5);
+  }
+  controls.update();
+}
+
+/* Drawer Toggles */
+let lOpen = true, rOpen = true, bOpen = true;
+function toggleLeftDrawer(force) {
+  lOpen = typeof force === 'boolean' ? force : !lOpen;
+  document.getElementById('left-drawer').classList.toggle('closed', !lOpen);
+  document.getElementById('tab-left').classList.toggle('closed', !lOpen);
+  document.getElementById('tab-left').textContent = lOpen ? '◀ PARTS' : '▶ PARTS';
+  document.getElementById('btn-left-drawer').classList.toggle('active-toggle', lOpen);
+  document.getElementById('bottom-drawer').classList.toggle('expand-left', !lOpen);
+}
+function toggleRightDrawer(force) {
+  rOpen = typeof force === 'boolean' ? force : !rOpen;
+  document.getElementById('right-drawer').classList.toggle('closed', !rOpen);
+  document.getElementById('tab-right').classList.toggle('closed', !rOpen);
+  document.getElementById('tab-right').textContent = rOpen ? 'CONTROLS ▶' : '◀ CONTROLS';
+  document.getElementById('btn-right-drawer').classList.toggle('active-toggle', rOpen);
+  document.getElementById('bottom-drawer').classList.toggle('expand-right', !rOpen);
+}
+function toggleBottomDrawer(force) {
+  bOpen = typeof force === 'boolean' ? force : !bOpen;
+  document.getElementById('bottom-drawer').classList.toggle('closed', !bOpen);
+  document.getElementById('tab-bottom').classList.toggle('closed', !bOpen);
+  document.getElementById('tab-bottom').textContent = bOpen ? '▼ LIVE GRAPHS & TELEMETRY' : '▲ LIVE GRAPHS & TELEMETRY';
+  document.getElementById('btn-bottom-drawer').classList.toggle('active-toggle', bOpen);
+}
+function toggleClean3D() {
+  const allClosed = !lOpen && !rOpen && !bOpen;
+  toggleLeftDrawer(allClosed);
+  toggleRightDrawer(allClosed);
+  toggleBottomDrawer(allClosed);
+  document.getElementById('btn-clean-3d').classList.toggle('active-toggle', !allClosed);
+}
+
+/* ============================================================================
+   8. COMPARISON TABLE, 10-STEP GUIDED COURSE & 10-QUESTION QUIZ MODALS
+   ============================================================================ */
+const GUIDED_STEPS = [
+  { title: 'Step 1: Identify the Magnetic Poles', text: 'Look at the red North Pole (−X) and blue South Pole (+X). Outside the magnet, uniform magnetic field lines B point from North to South (+X).' },
+  { title: 'Step 2: Inspect the Rectangular Coil ABCD', text: 'Click on the coil. Active arms AB (orange) and CD (cyan) have length L inside the magnetic field. The purple arrow n̂ is the Coil Area Normal vector.' },
+  { title: 'Step 3: Start Rotating the Generator Coil', text: 'In Mode A (Generator), the hand crank rotates the coil at angular speed ω, continuously changing the angle θ between B and n̂.' },
+  { title: 'Step 4: Observe Magnetic Flux vs. Induced EMF Phase', text: 'Click "θ = 0° (Max Φ)" in the top bar: Flux Φ = BA cos θ is maximum, but its rate of change dΦ/dt = 0 so EMF ε = 0! Now click "θ = 90°": Flux is zero, but arms cut field lines perpendicularly so EMF ε = NBAω is maximum!' },
+  { title: 'Step 5: Slip Rings (AC) vs. Split-Ring Commutator (DC)', text: 'In the Right Drawer, switch between "AC (2 Slip Rings)" and "DC (Split-Ring)". Click "Zoom Rings/Brushes" in the top bar to see how slip rings maintain continuous contact while a split-ring reverses brush polarity every 180°.' },
+  { title: 'Step 6: Lenz\'s Law & Mechanical Work', text: 'Toggle between "Open Circuit" and "Heavy Load" in Generator mode. When current flows, it experiences a Lorentz force that creates an opposing torque τ_Lenz—requiring mechanical energy input!' },
+  { title: 'Step 7: Switch to Mode B (Electric Motor)', text: 'Click "MODE B: ELECTRIC MOTOR" at the top. Now a DC battery injects current I into the coil through the carbon brushes and split-ring commutator.' },
+  { title: 'Step 8: Forces on Both Active Arms (Couple)', text: 'Notice the two orange force arrows F_AB and F_CD on the two active sides: one pushes UP while the other pushes DOWN (F = BIL), forming a torque couple τ = NIAB|sin θ|.' },
+  { title: 'Step 9: Role of the Split-Ring Commutator in a Motor', text: 'Enable "Slow Motion (0.15×)" and watch θ pass through 0°/180°. The split-ring reverses the current in arms AB and CD every half-turn so the torque continues pushing in the same rotational direction!' },
+  { title: 'Step 10: Back-EMF & Mechanical Loading', text: 'In Motor mode, click "Case 1: Start (ω=0)" vs "Case 3: Heavy Load". As the motor spins, it induces a Back-EMF (E_back = k_e ω) that opposes V, so I = (V − E_back)/R.' }
+];
+
+const QUIZ_QUESTIONS = [
+  { q: '1. What happens to the peak induced EMF (ε₀ = NBAω) of a generator if its rotation speed ω is doubled?', opts: ['It remains unchanged', 'It doubles (2×) and its frequency also doubles', 'It becomes half', 'It quadruples (4×)'], ans: 1, exp: 'By Faraday\'s law ε = NBAω sin(ωt), doubling ω doubles both the peak amplitude NBAω and the oscillation frequency.' },
+  { q: '2. If both the magnetic field strength B and number of turns N are doubled in a generator, peak EMF changes by:', opts: ['2×', '4×', 'Unchanged', '0.5×'], ans: 1, exp: 'Since ε₀ = N·B·A·ω, doubling both N and B multiplies the peak induced EMF by 2 × 2 = 4.' },
+  { q: '3. Why does an electric generator require a greater mechanical driving torque when a heavy electrical load (low R) is connected?', opts: ['Air friction increases', 'By Lenz\'s law, the larger induced current I experiences a magnetic force in B that produces an opposing torque τ = NIAB sin θ', 'The magnets become heavier', 'Slip rings lock up'], ans: 1, exp: 'Energy conservation & Lenz\'s law: drawing current I creates an opposing electromagnetic torque τ_Lenz proportional to I, requiring mechanical work P = τω.' },
+  { q: '4. At what coil orientation is the magnitude of induced EMF in a generator MAXIMUM?', opts: ['When coil plane is perpendicular to B (θ = 0°, Flux is maximum)', 'When coil plane is parallel to B (θ = 90°, Flux is zero but dΦ/dt is maximum)', 'At θ = 45°', 'EMF is constant at all angles'], ans: 1, exp: 'When the coil plane is parallel to B (θ = 90° between B and normal n̂), active sides AB and CD cut magnetic field lines perpendicularly, maximizing |dΦ/dt|.' },
+  { q: '5. What is the structural and functional difference between AC slip rings and a DC split-ring commutator?', opts: ['They are identical', 'Slip rings are two full continuous rings (preserving AC reversal); a split-ring is one ring cut into two insulated halves (reversing connections every 180°)', 'Slip rings only work with batteries', 'Split-rings block all current'], ans: 1, exp: 'Two continuous slip rings keep each brush connected to the same coil wire, whereas a split-ring swaps brush contact every half-turn.' },
+  { q: '6. In a DC motor, what happens to the direction of rotation if you reverse ONLY the battery current direction?', opts: ['Rotation direction reverses', 'Rotation direction stays the same', 'The motor stops', 'The magnetic field reverses'], ans: 0, exp: 'By F = I(L × B), reversing I while keeping B fixed reverses the forces on both active sides, reversing the torque.' },
+  { q: '7. What happens to the DC motor torque direction if you reverse BOTH the battery current I AND the magnetic poles (B)?', opts: ['Torque direction reverses', 'Torque direction remains the SAME (−I × −B = +F)', 'Torque becomes zero', 'The commutator melts'], ans: 1, exp: 'Reversing both Current I and Magnetic Field B introduces two sign flips (−1 × −1 = +1), leaving the force and torque direction unchanged!' },
+  { q: '8. Why is the starting current of a DC motor much larger at the instant it starts (ω = 0) than when running at full speed?', opts: ['Resistance is zero at start', 'At ω = 0, Back-EMF (E_back = k_e ω) is zero, so I_start = V / R is maximum', 'The magnets are stronger at start', 'The brushes short-circuit'], ans: 1, exp: 'Since I = (V − E_back)/R and E_back = 0 when stationary (ω = 0), starting current is limited only by armature resistance R.' },
+  { q: '9. When you attach a heavier mechanical load to a spinning DC motor shaft, what happens?', opts: ['Speed ω drops slightly → Back-EMF decreases → Armature current I = (V − E_back)/R increases to supply more torque', 'Current drops to zero', 'Speed increases to infinity', 'Back-EMF exceeds supply voltage'], ans: 0, exp: 'Increased mechanical load slows the rotor slightly, reducing E_back and allowing more current I to flow so electoral torque matches the load.' },
+  { q: '10. If a generator\'s external circuit switch is OPEN (R_load = ∞), which statement is true while the coil rotates?', opts: ['Both EMF and current are zero', 'Induced EMF ε = NBAω sin θ still appears across the brushes, but sustained external current I = 0', 'Current flows without EMF', 'The bulb glows brightly'], ans: 1, exp: 'Changing flux always induces an EMF across the open terminals by Faraday\'s law, but without a closed path, current I is zero.' }
+];
+
+function openModalView(type) {
+  const modal = document.getElementById('overlay-modal');
+  const title = document.getElementById('modal-title');
+  const body = document.getElementById('modal-body');
+  modal.style.display = 'block';
+
+  document.getElementById('pill-compare').classList.toggle('active-other', type === 'compare');
+  document.getElementById('pill-guided').classList.toggle('active-other', type === 'guided');
+  document.getElementById('pill-quiz').classList.toggle('active-other', type === 'quiz');
+
+  if (type === 'compare') {
+    title.textContent = 'Side-by-Side Comparison: Electric Generator vs. Electric Motor';
+    body.innerHTML = `
+      <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">
+        <strong>Same Machine, Two Operating Roles:</strong> An electromechanical machine can act as a generator when driven mechanically or as a motor when supplied electrically, though practical machines are optimized for their specific role.
+      </p>
+      <table class="comp-table">
+        <thead><tr><th>Feature</th><th style="color:var(--gen-col)">⚡ Electric Generator</th><th style="color:var(--mot-col)">⚙️ Electric Motor</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Main Purpose</strong></td><td>Converts Mechanical Energy → Electrical Energy</td><td>Converts Electrical Energy → Mechanical Energy</td></tr>
+          <tr><td><strong>Energy Input / Output</strong></td><td>Input: Mechanical Rotation (Crank/Turbine) → Output: Electricity</td><td>Input: DC/AC Electrical Supply → Output: Shaft Rotation</td></tr>
+          <tr><td><strong>Key Physical Principle</strong></td><td>Electromagnetic Induction (Faraday's Law: ε = −N dΦ/dt)</td><td>Lorentz Magnetic Force on Current (F = BIL, τ = NIAB sin θ)</td></tr>
+          <tr><td><strong>Governing Direction Rule</strong></td><td>Fleming's Right-Hand Rule / Lenz's Law</td><td>Fleming's Left-Hand Rule (F = I L × B)</td></tr>
+          <tr><td><strong>Ring / Brush Assembly</strong></td><td>AC: 2 Continuous Slip Rings | Elementary DC: Split-Ring Commutator</td><td>Elementary DC Motor: Split-Ring Commutator + Carbon Brushes</td></tr>
+          <tr><td><strong>Opposing Electromagnetic Effect</strong></td><td>Loaded current creates opposing Lenz torque τ_Lenz against crank</td><td>Rotating coil induces opposing Back-EMF (E_back = k_e ω) against V</td></tr>
+        </tbody>
+      </table>
+    `;
+  } else if (type === 'guided') {
+    const s = GUIDED_STEPS[state.guidedStep];
+    title.textContent = `Interactive Guided Learning (${state.guidedStep + 1} / ${GUIDED_STEPS.length})`;
+    body.innerHTML = `
+      <div class="info-card" style="font-size:13px; padding:14px;">
+        <h4 style="font-size:14px; margin-bottom:6px;">${s.title}</h4>
+        <p>${s.text}</p>
+      </div>
+      <div style="display:flex; justify-content:space-between; margin-top:10px;">
+        <button class="btn-sm" onclick="state.guidedStep=(state.guidedStep+GUIDED_STEPS.length-1)%GUIDED_STEPS.length; openModalView('guided')">◀ Previous Step</button>
+        <button class="btn-sm" style="background:var(--accent); color:#040811; font-weight:700;" onclick="state.guidedStep=(state.guidedStep+1)%GUIDED_STEPS.length; openModalView('guided')">Next Step ▶</button>
+      </div>
+    `;
+  } else if (type === 'quiz') {
+    const q = QUIZ_QUESTIONS[state.quizIdx];
+    title.textContent = `Prediction & Concept Challenge (${state.quizIdx + 1} / ${QUIZ_QUESTIONS.length}) — Score: ${state.quizScore}`;
+    body.innerHTML = `
+      <div class="info-card" style="font-size:13px;">
+        <p style="font-weight:700; margin-bottom:10px; color:#fff;">${q.q}</p>
+        ${q.opts.map((o, i) => `
+          <button class="btn-sm" style="width:100%; text-align:left; padding:8px 10px; margin-bottom:6px; font-size:12px;" onclick="submitQuizChoice(${i})">${o}</button>
+        `).join('')}
+        <div id="quiz-ans-box" style="display:none; margin-top:8px; padding:8px 10px; border-radius:6px; font-size:12px;"></div>
+      </div>
+      <div style="display:flex; justify-content:flex-end;">
+        <button class="btn-sm" onclick="state.quizIdx=(state.quizIdx+1)%QUIZ_QUESTIONS.length; openModalView('quiz')">Next Question ▶</button>
+      </div>
+    `;
+  }
+}
+
+function submitQuizChoice(choice) {
+  const q = QUIZ_QUESTIONS[state.quizIdx];
+  const box = document.getElementById('quiz-ans-box');
+  box.style.display = 'block';
+  if (choice === q.ans) {
+    state.quizScore++;
+    box.style.background = 'rgba(0, 245, 155, 0.16)';
+    box.style.border = '1px solid #00f59b';
+    box.style.color = '#a7f3d0';
+    box.textContent = '✓ Correct! ' + q.exp;
+  } else {
+    box.style.background = 'rgba(239, 68, 68, 0.16)';
+    box.style.border = '1px solid #ef4444';
+    box.style.color = '#fca5a5';
+    box.textContent = '✗ Not quite. ' + q.exp;
+  }
+}
+
+function closeModalView() {
+  document.getElementById('overlay-modal').style.display = 'none';
+  document.getElementById('pill-compare').classList.remove('active-other');
+  document.getElementById('pill-guided').classList.remove('active-other');
+  document.getElementById('pill-quiz').classList.remove('active-other');
+}
+
+function onWindowResize() {
+  const container = document.getElementById('canvas-container');
+  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+}
+
+/* ============================================================================
+   9. MAIN ANIMATION & PHYSICS LOOP
+   ============================================================================ */
+let prevT = performance.now();
+function animateLoop(now = performance.now()) {
+  requestAnimationFrame(animateLoop);
+  let dt = Math.min(0.05, (now - prevT) / 1000);
+  prevT = now;
+  if (state.slowMo) dt *= 0.15;
+
+  const phys = computeInstantaneousPhysics(dt);
+  update3DSceneFromPhysics(phys);
+  updateTelemetryAndOscilloscope(phys);
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  initThreeJS();
+  buildRightControls();
+  selectComponent('coil');
+  animateLoop();
+});
+</script>
+</body>
+</html>
